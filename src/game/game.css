@@ -6,6 +6,10 @@
   font-family: "Outfit", "Liberation Sans", sans-serif;
 }
 
+.game-root [hidden] {
+  display: none !important;
+}
+
 .stage {
   position: relative;
   height: 100%;
