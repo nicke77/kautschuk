@@ -95,6 +95,7 @@ export class Match {
       this.spawnField(name, 0);
       this.phase = "lobby";
       this.status = info.ip ? `${info.ip}:${info.port}` : "Ingen Wi-Fi-adress";
+      void lan.announce(cleanName(name), info.port);
     } catch (err) {
       this.error = err instanceof Error ? err.message : "Kunde inte starta värd";
       this.phase = "menu";
@@ -139,6 +140,7 @@ export class Match {
   leave(): void {
     void getLan().stop();
     this.phase = "menu";
+    this.mode = "solo";
     this.cars = [];
     this.started = false;
     this.error = "";
@@ -146,6 +148,24 @@ export class Match {
     this.inputs.clear();
     this.connToId.clear();
     this.idToConn.clear();
+    this.emit();
+  }
+
+  abortToLobby(): void {
+    if (this.mode !== "host" || this.phase !== "race") return;
+    const humans = this.cars.filter((c) => !c.bot);
+    this.inputs.clear();
+    this.cars = humans.map((human, index) => {
+      const spawn = this.track().spawns[index % this.track().spawns.length];
+      this.inputs.set(human.id, { ...ZERO_INPUT });
+      return createCar(spawn, human.id, human.name, false);
+    });
+    this.tick = 0;
+    this.finishTimer = -1;
+    this.started = false;
+    this.flash = "";
+    this.phase = "lobby";
+    this.broadcastLobby();
     this.emit();
   }
 
@@ -306,11 +326,12 @@ export class Match {
     }
     if (state === "closed" && this.mode === "host" && conn) {
       const id = this.connToId.get(conn);
-      if (id !== undefined && this.phase === "lobby") {
+      if (id !== undefined && this.phase !== "menu") {
         this.cars = this.cars.filter((c) => c.id !== id);
         this.connToId.delete(conn);
         this.idToConn.delete(id);
-        this.broadcastLobby();
+        this.inputs.delete(id);
+        if (this.phase === "lobby") this.broadcastLobby();
         this.emit();
       }
     }
@@ -371,12 +392,10 @@ export class Match {
     if (msg.op === "lobby") {
       this.trackIndex = num(msg.track);
       this.laps = num(msg.laps) || LAPS;
-      const mine = this.myId;
       this.cars = playersToCars(msg.players, this.track());
-      if (!this.cars.some((c) => c.id === mine) && mine) {
-        /* welcome arrives with the list already */
-      }
       this.phase = "lobby";
+      this.started = false;
+      this.flash = "";
       this.emit();
       return;
     }

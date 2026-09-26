@@ -1,18 +1,27 @@
 package se.kautschuk.lan;
 
+import android.content.Context;
+import android.net.wifi.WifiManager;
 import android.view.WindowManager;
+import androidx.activity.OnBackPressedCallback;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
 import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.InterfaceAddress;
 import java.net.NetworkInterface;
 import java.net.URI;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Enumeration;
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -21,13 +30,35 @@ import org.java_websocket.client.WebSocketClient;
 import org.java_websocket.handshake.ClientHandshake;
 import org.java_websocket.handshake.ServerHandshake;
 import org.java_websocket.server.WebSocketServer;
+import org.json.JSONObject;
 
 @CapacitorPlugin(name = "KautschukLan")
 public class KautschukLanPlugin extends Plugin {
+    private static final int DISCOVERY_PORT = 47822;
     private WebSocketServer host;
     private WebSocketClient client;
     private final ConcurrentHashMap<String, WebSocket> peers = new ConcurrentHashMap<>();
     private final AtomicInteger seq = new AtomicInteger(1);
+    private volatile boolean announcing;
+    private volatile boolean listening;
+    private DatagramSocket announceSocket;
+    private DatagramSocket listenSocket;
+    private WifiManager.MulticastLock multicastLock;
+    private String announceName = "Kautschuk";
+    private int announcePort = 47821;
+
+    @Override
+    public void load() {
+        if (getActivity() == null) return;
+        getActivity().getOnBackPressedDispatcher().addCallback(getActivity(), new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                if (getBridge() != null) {
+                    getBridge().eval("window.__kautschukBack&&window.__kautschukBack()", null);
+                }
+            }
+        });
+    }
 
     @PluginMethod
     public void startHost(PluginCall call) {
@@ -168,10 +199,201 @@ public class KautschukLanPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void announce(PluginCall call) {
+        announceName = call.getString("name", "Kautschuk");
+        announcePort = call.getInt("port", 47821);
+        startAnnounce();
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void listen(PluginCall call) {
+        startListen();
+        call.resolve();
+    }
+
+    @PluginMethod
     public void stop(PluginCall call) {
+        stopDiscovery();
         stopSockets();
         keepScreen(false);
         call.resolve();
+    }
+
+    private void stopDiscovery() {
+        announcing = false;
+        listening = false;
+        DatagramSocket announce = announceSocket;
+        announceSocket = null;
+        if (announce != null) {
+            try {
+                announce.close();
+            } catch (Exception ignored) {
+            }
+        }
+        DatagramSocket listen = listenSocket;
+        listenSocket = null;
+        if (listen != null) {
+            try {
+                listen.close();
+            } catch (Exception ignored) {
+            }
+        }
+        WifiManager.MulticastLock lock = multicastLock;
+        multicastLock = null;
+        if (lock != null && lock.isHeld()) {
+            try {
+                lock.release();
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    private void startAnnounce() {
+        announcing = false;
+        DatagramSocket previous = announceSocket;
+        announceSocket = null;
+        if (previous != null) {
+            try {
+                previous.close();
+            } catch (Exception ignored) {
+            }
+        }
+        final DatagramSocket socket;
+        try {
+            socket = new DatagramSocket();
+            socket.setBroadcast(true);
+        } catch (Exception ex) {
+            return;
+        }
+        announceSocket = socket;
+        announcing = true;
+        Thread thread = new Thread(() -> {
+            try {
+                while (announcing && announceSocket == socket) {
+                    byte[] payload = discoveryPayload();
+                    for (InetAddress dest : broadcastTargets()) {
+                        try {
+                            socket.send(new DatagramPacket(payload, payload.length, dest, DISCOVERY_PORT));
+                        } catch (Exception ignored) {
+                        }
+                    }
+                    Thread.sleep(1000);
+                }
+            } catch (Exception ignored) {
+            } finally {
+                if (!socket.isClosed()) socket.close();
+            }
+        }, "kautschuk-announce");
+        thread.setDaemon(true);
+        thread.start();
+    }
+
+    private byte[] discoveryPayload() {
+        try {
+            JSONObject obj = new JSONObject();
+            obj.put("app", "kautschuk");
+            obj.put("name", announceName == null || announceName.isEmpty() ? "Kautschuk" : announceName);
+            obj.put("ip", findIp());
+            obj.put("port", announcePort);
+            return obj.toString().getBytes(StandardCharsets.UTF_8);
+        } catch (Exception ex) {
+            return "{\"app\":\"kautschuk\"}".getBytes(StandardCharsets.UTF_8);
+        }
+    }
+
+    private List<InetAddress> broadcastTargets() {
+        List<InetAddress> out = new ArrayList<>();
+        try {
+            out.add(InetAddress.getByName("255.255.255.255"));
+        } catch (Exception ignored) {
+        }
+        try {
+            Enumeration<NetworkInterface> ifaces = NetworkInterface.getNetworkInterfaces();
+            while (ifaces.hasMoreElements()) {
+                NetworkInterface nif = ifaces.nextElement();
+                if (!nif.isUp() || nif.isLoopback()) continue;
+                for (InterfaceAddress ia : nif.getInterfaceAddresses()) {
+                    InetAddress broadcast = ia.getBroadcast();
+                    if (broadcast != null) out.add(broadcast);
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return out;
+    }
+
+    private void startListen() {
+        if (listening) return;
+        listening = true;
+        Thread thread = new Thread(() -> {
+            DatagramSocket socket = null;
+            try {
+                socket = new DatagramSocket(null);
+                socket.setReuseAddress(true);
+                socket.setBroadcast(true);
+                socket.bind(new InetSocketAddress(DISCOVERY_PORT));
+                listenSocket = socket;
+                holdMulticast();
+                byte[] buf = new byte[512];
+                while (listening) {
+                    DatagramPacket packet = new DatagramPacket(buf, buf.length);
+                    socket.receive(packet);
+                    handleDiscovery(packet);
+                }
+            } catch (Exception ignored) {
+                if (listenSocket != socket) listening = false;
+            } finally {
+                if (socket != null && !socket.isClosed()) socket.close();
+            }
+        }, "kautschuk-listen");
+        thread.setDaemon(true);
+        thread.start();
+    }
+
+    private void holdMulticast() {
+        try {
+            if (getContext() == null) return;
+            WifiManager wifi = (WifiManager) getContext().getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+            if (wifi == null) return;
+            WifiManager.MulticastLock lock = wifi.createMulticastLock("kautschuk");
+            lock.setReferenceCounted(false);
+            lock.acquire();
+            multicastLock = lock;
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void handleDiscovery(DatagramPacket packet) {
+        try {
+            String text = new String(packet.getData(), packet.getOffset(), packet.getLength(), StandardCharsets.UTF_8);
+            JSONObject obj = new JSONObject(text);
+            if (!"kautschuk".equals(obj.optString("app"))) return;
+            String from = packet.getAddress() instanceof Inet4Address ? packet.getAddress().getHostAddress() : "";
+            if (from == null || from.isEmpty() || isLocal(from)) return;
+            JSObject payload = new JSObject();
+            String name = obj.optString("name", "Kautschuk");
+            payload.put("name", name.isEmpty() ? "Kautschuk" : name);
+            payload.put("ip", from);
+            payload.put("port", obj.optInt("port", 47821));
+            emit(payload, "discover");
+        } catch (Exception ignored) {
+        }
+    }
+
+    private boolean isLocal(String ip) {
+        try {
+            Enumeration<NetworkInterface> ifaces = NetworkInterface.getNetworkInterfaces();
+            while (ifaces.hasMoreElements()) {
+                Enumeration<InetAddress> addrs = ifaces.nextElement().getInetAddresses();
+                while (addrs.hasMoreElements()) {
+                    String host = addrs.nextElement().getHostAddress();
+                    if (ip.equals(host)) return true;
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return false;
     }
 
     private void stopSockets() {

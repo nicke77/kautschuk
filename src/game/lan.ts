@@ -1,11 +1,16 @@
 export type LanStatus = { state: string; conn?: string; detail?: string };
 
+export type DiscoveredHost = { name: string; ip: string; port: number };
+
 export type LanApi = {
   canHost: boolean;
+  canDiscover: boolean;
   startHost: (port: number) => Promise<{ ip: string; port: number }>;
   connect: (url: string) => Promise<void>;
   send: (data: string, conn?: string) => void;
   stop: () => Promise<void>;
+  listen: () => Promise<void>;
+  announce: (name: string, port: number) => Promise<void>;
 };
 
 type MessageHandler = (data: string, conn?: string) => void;
@@ -14,6 +19,7 @@ type StatusHandler = (status: LanStatus) => void;
 let api: LanApi | null = null;
 let onMessage: MessageHandler = () => {};
 let onStatus: StatusHandler = () => {};
+let onDiscover: (host: DiscoveredHost) => void = () => {};
 
 export function setLanApi(next: LanApi): void {
   api = next;
@@ -24,6 +30,10 @@ export function setLanHandlers(message: MessageHandler, status: StatusHandler): 
   onStatus = status;
 }
 
+export function setDiscoverHandler(handler: (host: DiscoveredHost) => void): void {
+  onDiscover = handler;
+}
+
 export function emitLanMessage(data: string, conn?: string): void {
   onMessage(data, conn);
 }
@@ -32,12 +42,18 @@ export function emitLanStatus(status: LanStatus): void {
   onStatus(status);
 }
 
+export function emitDiscover(host: DiscoveredHost): void {
+  if (!host.ip) return;
+  onDiscover(host);
+}
+
 export function getLan(): LanApi {
   return api ?? webLan;
 }
 
 const webLan: LanApi = {
   canHost: false,
+  canDiscover: false,
   async startHost() {
     throw new Error("Värdläge finns i Android-appen.");
   },
@@ -87,6 +103,8 @@ const webLan: LanApi = {
     webSocket?.close();
     webSocket = null;
   },
+  async listen() {},
+  async announce() {},
 };
 
 let webSocket: WebSocket | null = null;

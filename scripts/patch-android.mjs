@@ -23,7 +23,7 @@ if (!manifest.includes("usesCleartextTraffic")) {
 if (!manifest.includes("ACCESS_NETWORK_STATE")) {
   manifest = manifest.replace(
     "</manifest>",
-    '    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />\n    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />\n</manifest>',
+    '    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />\n    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />\n    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />\n</manifest>',
   );
 }
 writeFileSync(manifestPath, manifest);
@@ -33,7 +33,7 @@ let gradle = readFileSync(gradlePath, "utf8");
 if (!gradle.includes("Java-WebSocket")) {
   gradle = gradle.replace(
     "dependencies {",
-    "dependencies {\n    implementation 'org.java-websocket:Java-WebSocket:1.5.7'",
+    "dependencies {\n    implementation 'org.java-websocket:Java-WebSocket:1.5.7'\n    implementation 'androidx.activity:activity:1.11.0'",
   );
 }
 writeFileSync(gradlePath, gradle);

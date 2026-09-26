@@ -2,6 +2,7 @@ import { updateAudio, unlockAudio } from "./audio";
 import { drawWorld, fitView, type Skid } from "./draw";
 import { forwardSpeed } from "./sim";
 import { bestScore, cleanName, Match } from "./match";
+import { getLan, setDiscoverHandler, type DiscoveredHost } from "./lan";
 import { TRACKS } from "./tracks";
 import { CAR_COLORS, type Input } from "./types";
 
@@ -48,6 +49,7 @@ export function mountKautschuk(root: HTMLElement): () => void {
   let last = performance.now();
   let raf = 0;
   let stopped = false;
+  const found = new Map<string, DiscoveredHost & { seen: number }>();
 
   let screen: "menu" | "net" = "menu";
   const nameInput = ui.querySelector("input") as HTMLInputElement;
@@ -83,8 +85,7 @@ export function mountKautschuk(root: HTMLElement): () => void {
     openNet();
   });
   ui.querySelector("[data-back]")?.addEventListener("click", () => {
-    screen = "menu";
-    match.leave();
+    stepBack();
   });
   ui.querySelector("[data-host]")?.addEventListener("click", () => {
     unlockAudio();
@@ -101,8 +102,15 @@ export function mountKautschuk(root: HTMLElement): () => void {
   });
   ui.querySelector("[data-again]")?.addEventListener("click", () => match.again());
   ui.querySelector("[data-menu]")?.addEventListener("click", () => {
-    screen = "menu";
-    match.leave();
+    stepBack();
+  });
+  ui.querySelector("[data-found]")?.addEventListener("click", (ev) => {
+    const btn = (ev.target as HTMLElement).closest<HTMLElement>("[data-join-ip]");
+    if (!btn) return;
+    unlockAudio();
+    const ip = btn.getAttribute("data-join-ip") ?? "";
+    const port = btn.getAttribute("data-join-port");
+    void match.join(port ? `${ip}:${port}` : ip, nameInput.value);
   });
 
   for (const button of ui.querySelectorAll<HTMLButtonElement>("[data-track]")) {
@@ -112,6 +120,23 @@ export function mountKautschuk(root: HTMLElement): () => void {
     });
   }
   bindTouch(touch, touchState);
+
+  setDiscoverHandler((host) => {
+    found.set(host.ip, { ...host, seen: Date.now() });
+    paintChrome();
+  });
+  const expire = window.setInterval(() => {
+    const now = Date.now();
+    let dropped = false;
+    for (const [ip, row] of found) {
+      if (now - row.seen > 4000) {
+        found.delete(ip);
+        dropped = true;
+      }
+    }
+    if (dropped) paintChrome();
+  }, 1000);
+  window.__kautschukBack = () => stepBack();
 
   window.__controlsTest = {
     getYaw: () => {
@@ -156,10 +181,13 @@ export function mountKautschuk(root: HTMLElement): () => void {
     cancelAnimationFrame(raf);
     unsub();
     match.leave();
+    window.clearInterval(expire);
+    setDiscoverHandler(() => {});
     window.removeEventListener("keydown", onKeyDown);
     window.removeEventListener("keyup", onKeyUp);
     window.removeEventListener("blur", onBlur);
     if (window.__controlsTest) delete window.__controlsTest;
+    if (window.__kautschukBack) delete window.__kautschukBack;
   };
 
   function rememberName() {
@@ -180,10 +208,38 @@ export function mountKautschuk(root: HTMLElement): () => void {
     screen = "net";
     const hint = ui.querySelector("[data-host-hint]");
     if (hint) {
-      hint.textContent =
-        "Android-appen är värd. Den visar en adress. De andra skriver in den. Samma Wi-Fi, inte gästnät.";
+      hint.textContent = getLan().canDiscover
+        ? "Bli värd så syns spelet för andra på samma Wi-Fi. Eller tryck på ett spel nedan. Inte gästnät."
+        : "Android-appen är värd och syns automatiskt för andra på samma Wi-Fi. Inte gästnät.";
     }
+    const addr = ui.querySelector("[data-addr]");
+    if (addr) addr.textContent = getLan().canDiscover ? "Eller skriv adress" : "Värdens adress";
+    void getLan().listen();
     paintChrome();
+  }
+
+  function stepBack() {
+    if (match.phase === "results") {
+      screen = "menu";
+      match.leave();
+      return;
+    }
+    if (match.phase === "race") {
+      if (match.mode === "host") {
+        screen = "net";
+        match.abortToLobby();
+        return;
+      }
+      screen = "menu";
+      match.leave();
+      return;
+    }
+    if (screen === "net" || match.phase === "lobby") {
+      screen = "menu";
+      found.clear();
+      match.leave();
+      return;
+    }
   }
 
   function paintChrome() {
@@ -217,6 +273,23 @@ export function mountKautschuk(root: HTMLElement): () => void {
     if (go) go.hidden = !(match.mode === "host" && match.phase === "lobby");
     const waiting = ui.querySelector<HTMLElement>("[data-wait]");
     if (waiting) waiting.hidden = !(match.mode === "client" && match.phase === "lobby");
+    const discover = ui.querySelector<HTMLElement>("[data-discover]");
+    const showFound = showNet && getLan().canDiscover && match.mode !== "host";
+    if (discover) discover.hidden = !showFound;
+    if (showFound) {
+      const list = ui.querySelector("[data-found]");
+      const empty = ui.querySelector<HTMLElement>("[data-found-empty]");
+      const rows = [...found.values()];
+      if (list) {
+        list.innerHTML = rows
+          .map(
+            (row) =>
+              `<li><button type="button" class="found" data-join-ip="${escapeHtml(row.ip)}" data-join-port="${row.port}"><span>${escapeHtml(row.name)}</span><span>${escapeHtml(row.ip)}</span></button></li>`,
+          )
+          .join("");
+      }
+      if (empty) empty.hidden = rows.length > 0;
+    }
     const best = ui.querySelector<HTMLElement>("[data-best]");
     if (best) {
       const score = bestScore();
@@ -377,9 +450,14 @@ function panel(): HTMLElement {
       <p class="ip" data-show-ip></p>
       <ul class="roster" data-roster></ul>
       <p class="note" data-host-hint></p>
+      <div data-discover hidden>
+        <div class="kicker">Spel i närheten</div>
+        <ul class="roster" data-found></ul>
+        <p class="note" data-found-empty>Letar efter värd…</p>
+      </div>
       <div class="actions">
         <button type="button" class="btn primary" data-host>Bli värd</button>
-        <label class="field"><span>Värdens adress</span><input data-ip placeholder="192.168.0.12" inputmode="decimal" aria-label="Värdens adress" /></label>
+        <label class="field"><span data-addr>Värdens adress</span><input data-ip placeholder="192.168.0.12" inputmode="decimal" aria-label="Värdens adress" /></label>
         <button type="button" class="btn" data-join>Gå med</button>
         <button type="button" class="btn primary" data-go hidden>Kör</button>
         <p class="note" data-wait hidden>Väntar på att värden startar.</p>
@@ -476,5 +554,6 @@ declare global {
       setKeys?: (codes: string[]) => void;
       setSteer?: (v: number) => void;
     };
+    __kautschukBack?: () => void;
   }
 }

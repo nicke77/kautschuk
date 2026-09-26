@@ -332,6 +332,21 @@
   border-radius: 0.4rem;
 }
 
+.found {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
 .row {
   display: flex;
   gap: 0.5rem;
