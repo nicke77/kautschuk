@@ -1,7 +1,7 @@
 import { updateAudio, unlockAudio } from "./audio";
 import { drawWorld, fitView, type Skid } from "./draw";
 import { forwardSpeed } from "./sim";
-import { bestScore, cleanName, Match } from "./match";
+import { bestTime, cleanName, Match } from "./match";
 import { getLan, setDiscoverHandler, type DiscoveredHost } from "./lan";
 import { TRACKS } from "./tracks";
 import { CAR_COLORS, type Input } from "./types";
@@ -44,7 +44,6 @@ export function mountKautschuk(root: HTMLElement): () => void {
   let steerOverride: number | null = null;
   const touchState: TouchState = { steer: 0, throttle: 0, brake: 0, hb: false, gas: false };
   const skids: Skid[] = [];
-  let flashUntil = 0;
   let acc = 0;
   let last = performance.now();
   let raf = 0;
@@ -78,7 +77,6 @@ export function mountKautschuk(root: HTMLElement): () => void {
     unlockAudio();
     rememberName();
     match.solo(nameInput.value);
-    flashUntil = performance.now() + 700;
   });
   ui.querySelector("[data-net]")?.addEventListener("click", () => {
     rememberName();
@@ -98,7 +96,6 @@ export function mountKautschuk(root: HTMLElement): () => void {
   });
   ui.querySelector("[data-go]")?.addEventListener("click", () => {
     match.startRace();
-    flashUntil = performance.now() + 700;
   });
   ui.querySelector("[data-again]")?.addEventListener("click", () => match.again());
   ui.querySelector("[data-menu]")?.addEventListener("click", () => {
@@ -171,7 +168,7 @@ export function mountKautschuk(root: HTMLElement): () => void {
     const me = match.me();
     updateAudio(me ? forwardSpeed(me) : 0, me?.skid ?? 0, match.phase === "race" ? 1 : 0);
     render(ctx, canvas, match, skids, now / 1000);
-    paintHud(match, hud, flash, flashUntil, now);
+    paintHud(match, hud, flash);
     raf = requestAnimationFrame(loop);
   };
   raf = requestAnimationFrame(loop);
@@ -292,9 +289,9 @@ export function mountKautschuk(root: HTMLElement): () => void {
     }
     const best = ui.querySelector<HTMLElement>("[data-best]");
     if (best) {
-      const score = bestScore();
+      const time = bestTime();
       best.hidden = !showMenu;
-      best.textContent = score > 0 ? `Bästa gummi: ${score}` : "";
+      best.textContent = time > 0 ? `Bästa tid: ${time.toFixed(1)} s` : "";
     }
     if (showResults) {
       const list = ui.querySelector("[data-results]");
@@ -303,7 +300,8 @@ export function mountKautschuk(root: HTMLElement): () => void {
           .ranking()
           .map((car, index) => {
             const color = CAR_COLORS[car.id % CAR_COLORS.length];
-            return `<li><span>${place(index)} ${escapeHtml(car.name)}</span><span style="color:${color}">${Math.floor(car.drift)}</span></li>`;
+            const mark = car.finished && car.finishAt >= 0 ? `${car.finishAt.toFixed(1)}s` : "–";
+            return `<li><span>${place(index)} ${escapeHtml(car.name)}</span><span style="color:${color}">${mark}</span></li>`;
           })
           .join("");
       }
@@ -339,7 +337,7 @@ function render(
   drawWorld(ctx, track, match.cars, skids, view, w, h, time, match.phase === "race" || match.phase === "results");
 }
 
-function paintHud(match: Match, hud: HTMLElement, flash: HTMLElement, flashUntil: number, now: number) {
+function paintHud(match: Match, hud: HTMLElement, flash: HTMLElement) {
   const me = match.me();
   const score = hud.querySelector("[data-score]");
   const chain = hud.querySelector("[data-chain]");
@@ -357,7 +355,12 @@ function paintHud(match: Match, hud: HTMLElement, flash: HTMLElement, flashUntil
     if (chain) chain.textContent = me.chain > 1.2 ? `kedja ${me.chain.toFixed(1)}` : "";
     if (oil) oil.hidden = !me.onOil;
   }
-  flash.hidden = now > flashUntil;
+  if (match.flash) {
+    flash.textContent = match.flash;
+    flash.hidden = false;
+  } else {
+    flash.hidden = true;
+  }
 }
 
 function collectSkids(match: Match, skids: Skid[]) {
@@ -467,7 +470,7 @@ function panel(): HTMLElement {
       <p class="note">APK och källkod: github.com/nicke77/kautschuk</p>
     </div>
     <div data-results-only hidden>
-      <div class="kicker">Gummi</div>
+      <div class="kicker">Mål</div>
       <h2 class="score">Resultat</h2>
       <ul class="roster" data-results></ul>
       <div class="row">

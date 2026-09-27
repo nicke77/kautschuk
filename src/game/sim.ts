@@ -130,17 +130,15 @@ function crossGates(car: Car, track: Track, x0: number, y0: number): void {
   if (car.finished) return;
   const a = { x: x0, y: y0 };
   const b = { x: car.x, y: car.y };
-  const gate = track.gates[car.next];
+  const index = car.next;
+  const gate = track.gates[index];
   if (!gate) return;
   if (!segmentsCross(a, b, gate.a, gate.b)) return;
   const dx = b.x - a.x;
   const dy = b.y - a.y;
   if (dx * gate.nx + dy * gate.ny <= 0) return;
-  car.next += 1;
-  if (car.next >= track.gates.length) {
-    car.next = 0;
-    car.lap += 1;
-  }
+  if (index === 0) car.lap += 1;
+  car.next = (index + 1) % track.gates.length;
 }
 
 export function createCar(spawn: { x: number; y: number; h: number }, id: number, name: string, bot: boolean): Car {
@@ -160,6 +158,7 @@ export function createCar(spawn: { x: number; y: number; h: number }, id: number
     skid: 0,
     onOil: false,
     finished: false,
+    finishAt: -1,
     stuck: 0,
     wp: 0,
   };
@@ -307,7 +306,9 @@ export function botInput(car: Car, track: Track): Input {
 export function rankCars(cars: Car[]): Car[] {
   return [...cars].sort((a, b) => {
     if (a.finished !== b.finished) return a.finished ? -1 : 1;
-    if (b.drift !== a.drift) return b.drift - a.drift;
-    return b.lap - a.lap || a.next - b.next;
+    if (a.finished && b.finished && a.finishAt !== b.finishAt) return a.finishAt - b.finishAt;
+    if (b.lap !== a.lap) return b.lap - a.lap;
+    if (b.next !== a.next) return b.next - a.next;
+    return a.id - b.id;
   });
 }

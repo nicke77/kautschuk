@@ -22,7 +22,10 @@ export class Match {
   error = "";
   tick = 0;
   finishTimer = -1;
+  countdown = 0;
+  raceTime = 0;
   flash = "";
+  private flashHold = 0;
   private inputs = new Map<number, Input>();
   private connToId = new Map<string, number>();
   private idToConn = new Map<number, string>();
@@ -71,9 +74,7 @@ export class Match {
     this.resetRun("solo");
     this.myId = 0;
     this.spawnField(name, 3);
-    this.phase = "race";
-    this.flash = "Kör";
-    this.started = true;
+    this.beginCountdown();
     this.emit();
   }
 
@@ -127,12 +128,9 @@ export class Match {
   startRace(): void {
     if (this.mode === "client") return;
     if (this.mode === "host") this.fillBots();
-    this.phase = "race";
-    this.started = true;
-    this.flash = "Kör";
-    this.finishTimer = -1;
+    this.beginCountdown();
     if (this.mode === "host") {
-      getLan().send(JSON.stringify({ op: "start", track: this.trackIndex, laps: this.laps }));
+      getLan().send(JSON.stringify({ op: "start", track: this.trackIndex, laps: this.laps, countdown: 3 }));
     }
     this.emit();
   }
@@ -200,6 +198,21 @@ export class Match {
 
   fixed(dt: number): void {
     if (this.phase !== "race" || !this.started) return;
+    if (this.countdown > 0) {
+      this.countdown -= dt;
+      if (this.countdown > 0) {
+        this.flash = String(Math.ceil(this.countdown));
+        return;
+      }
+      this.countdown = 0;
+      this.flash = "Kör";
+      this.flashHold = 0.75;
+      return;
+    }
+    if (this.flashHold > 0) {
+      this.flashHold -= dt;
+      if (this.flashHold <= 0) this.flash = "";
+    }
     if (this.mode === "client") {
       this.inputAcc += dt;
       if (this.inputAcc >= 0.05) {
@@ -213,10 +226,13 @@ export class Match {
       return;
     }
 
+    this.raceTime += dt;
     const track = this.track();
     for (const car of this.cars) {
+      const wasFinished = car.finished;
       const input = car.bot ? botInput(car, track) : (this.inputs.get(car.id) ?? ZERO_INPUT);
       stepCar(car, input, track, dt, this.laps);
+      if (!wasFinished && car.finished) car.finishAt = this.raceTime;
     }
     separateCars(this.cars);
     this.tick += 1;
@@ -236,10 +252,10 @@ export class Match {
     this.phase = "results";
     this.started = false;
     const me = this.me();
-    if (me) {
+    if (me?.finished && me.finishAt >= 0) {
       try {
-        const prev = Number(localStorage.getItem("kautschuk-best") ?? "0");
-        if (me.drift > prev) localStorage.setItem("kautschuk-best", String(Math.floor(me.drift)));
+        const prev = Number(localStorage.getItem("kautschuk-best-time") ?? "0");
+        if (prev <= 0 || me.finishAt < prev) localStorage.setItem("kautschuk-best-time", me.finishAt.toFixed(2));
       } catch {
         /* ignore quota */
       }
@@ -257,9 +273,22 @@ export class Match {
     this.nextId = 1;
     this.tick = 0;
     this.finishTimer = -1;
+    this.countdown = 0;
+    this.raceTime = 0;
     this.started = false;
     this.error = "";
     this.flash = "";
+    this.flashHold = 0;
+  }
+
+  private beginCountdown(): void {
+    this.phase = "race";
+    this.started = true;
+    this.countdown = 3;
+    this.raceTime = 0;
+    this.finishTimer = -1;
+    this.flash = "3";
+    this.flashHold = 0;
   }
 
   private spawnField(name: string, bots: number): void {
@@ -300,6 +329,7 @@ export class Match {
       skid: Math.round(c.skid * 100) / 100,
       oil: c.onOil,
       finished: c.finished,
+      finishAt: c.finished ? Math.round(c.finishAt * 10) / 10 : -1,
     }));
   }
 
@@ -410,7 +440,9 @@ export class Match {
       this.laps = num(msg.laps) || LAPS;
       this.phase = "race";
       this.started = true;
-      this.flash = "Kör";
+      this.countdown = num(msg.countdown) || 3;
+      this.raceTime = 0;
+      this.flash = String(Math.ceil(this.countdown));
       this.emit();
       return;
     }
@@ -447,6 +479,7 @@ export class Match {
       car.skid = snap.skid;
       car.onOil = snap.oil;
       car.finished = snap.finished;
+      car.finishAt = snap.finishAt;
     }
   }
 }
@@ -470,9 +503,9 @@ export function cleanName(name: string): string {
   return trimmed || "Du";
 }
 
-export function bestScore(): number {
+export function bestTime(): number {
   try {
-    return Number(localStorage.getItem("kautschuk-best") ?? "0") || 0;
+    return Number(localStorage.getItem("kautschuk-best-time") ?? "0") || 0;
   } catch {
     return 0;
   }

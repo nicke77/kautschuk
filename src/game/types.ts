@@ -41,6 +41,7 @@ export type Car = {
   skid: number;
   onOil: boolean;
   finished: boolean;
+  finishAt: number;
   stuck: number;
   wp: number;
 };
@@ -60,6 +61,7 @@ export type SnapCar = {
   skid: number;
   oil: boolean;
   finished: boolean;
+  finishAt: number;
 };
 
 export const CAR_COLORS = ["#f0b429", "#f4efe6", "#e23d2b", "#c46a3a"] as const;
