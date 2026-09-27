@@ -20,6 +20,7 @@ let api: LanApi | null = null;
 let onMessage: MessageHandler = () => {};
 let onStatus: StatusHandler = () => {};
 let onDiscover: (host: DiscoveredHost) => void = () => {};
+let onScan: (text: string) => void = () => {};
 
 export function setLanApi(next: LanApi): void {
   api = next;
@@ -34,6 +35,10 @@ export function setDiscoverHandler(handler: (host: DiscoveredHost) => void): voi
   onDiscover = handler;
 }
 
+export function setScanHandler(handler: (text: string) => void): void {
+  onScan = handler;
+}
+
 export function emitLanMessage(data: string, conn?: string): void {
   onMessage(data, conn);
 }
@@ -45,6 +50,10 @@ export function emitLanStatus(status: LanStatus): void {
 export function emitDiscover(host: DiscoveredHost): void {
   if (!host.ip) return;
   onDiscover(host);
+}
+
+export function emitScan(text: string): void {
+  onScan(text);
 }
 
 export function getLan(): LanApi {

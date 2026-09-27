@@ -3,7 +3,7 @@ import "@fontsource/outfit/latin-ext-400.css";
 import "@fontsource/outfit/latin-ext-500.css";
 import "./game/game.css";
 import { Capacitor, registerPlugin } from "@capacitor/core";
-import { emitDiscover, emitLanMessage, emitLanStatus, setLanApi } from "./game/lan";
+import { emitDiscover, emitLanMessage, emitLanStatus, emitScan, setLanApi } from "./game/lan";
 import { mountKautschuk } from "./game/shell";
 
 type NativeLan = {
@@ -30,7 +30,13 @@ type NativeLan = {
 if (Capacitor.isNativePlatform()) {
   const native = registerPlugin<NativeLan>("KautschukLan");
   void native.addListener("message", (event) => emitLanMessage(event.data, event.conn));
-  void native.addListener("status", (event) => emitLanStatus(event));
+  void native.addListener("status", (event) => {
+    if (event.state === "discovery") {
+      emitScan(event.detail ?? "");
+      return;
+    }
+    emitLanStatus(event);
+  });
   void native.addListener("discover", (event) => emitDiscover(event));
   setLanApi({
     canHost: true,

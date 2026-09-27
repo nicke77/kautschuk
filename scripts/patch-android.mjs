@@ -20,12 +20,20 @@ let manifest = readFileSync(manifestPath, "utf8");
 if (!manifest.includes("usesCleartextTraffic")) {
   manifest = manifest.replace("<application", '<application android:usesCleartextTraffic="true"');
 }
-if (!manifest.includes("ACCESS_NETWORK_STATE")) {
-  manifest = manifest.replace(
-    "</manifest>",
-    '    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />\n    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />\n    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />\n</manifest>',
-  );
+function ensurePermission(xml, name, extra = "") {
+  if (xml.includes(name)) return xml;
+  const tag = `    <uses-permission android:name="${name}"${extra} />\n`;
+  return xml.replace("</manifest>", `${tag}</manifest>`);
 }
+
+manifest = ensurePermission(manifest, "android.permission.ACCESS_NETWORK_STATE");
+manifest = ensurePermission(manifest, "android.permission.ACCESS_WIFI_STATE");
+manifest = ensurePermission(manifest, "android.permission.CHANGE_WIFI_MULTICAST_STATE");
+manifest = ensurePermission(
+  manifest,
+  "android.permission.NEARBY_WIFI_DEVICES",
+  ' android:usesPermissionFlags="neverForLocation"',
+);
 writeFileSync(manifestPath, manifest);
 
 const gradlePath = join(android, "app/build.gradle");

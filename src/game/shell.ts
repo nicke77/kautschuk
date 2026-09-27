@@ -2,7 +2,7 @@ import { updateAudio, unlockAudio } from "./audio";
 import { drawWorld, fitView, type Skid } from "./draw";
 import { forwardSpeed } from "./sim";
 import { bestTime, cleanName, Match } from "./match";
-import { getLan, setDiscoverHandler, type DiscoveredHost } from "./lan";
+import { getLan, setDiscoverHandler, setScanHandler, type DiscoveredHost } from "./lan";
 import { TRACKS } from "./tracks";
 import { CAR_COLORS, type Input } from "./types";
 
@@ -49,6 +49,7 @@ export function mountKautschuk(root: HTMLElement): () => void {
   let raf = 0;
   let stopped = false;
   const found = new Map<string, DiscoveredHost & { seen: number }>();
+  let scanNote = "";
 
   let screen: "menu" | "net" = "menu";
   const nameInput = ui.querySelector("input") as HTMLInputElement;
@@ -122,11 +123,15 @@ export function mountKautschuk(root: HTMLElement): () => void {
     found.set(host.ip, { ...host, seen: Date.now() });
     paintChrome();
   });
+  setScanHandler((text) => {
+    scanNote = text;
+    paintChrome();
+  });
   const expire = window.setInterval(() => {
     const now = Date.now();
     let dropped = false;
     for (const [ip, row] of found) {
-      if (now - row.seen > 4000) {
+      if (now - row.seen > 7000) {
         found.delete(ip);
         dropped = true;
       }
@@ -180,6 +185,7 @@ export function mountKautschuk(root: HTMLElement): () => void {
     match.leave();
     window.clearInterval(expire);
     setDiscoverHandler(() => {});
+    setScanHandler(() => {});
     window.removeEventListener("keydown", onKeyDown);
     window.removeEventListener("keyup", onKeyUp);
     window.removeEventListener("blur", onBlur);
@@ -206,7 +212,7 @@ export function mountKautschuk(root: HTMLElement): () => void {
     const hint = ui.querySelector("[data-host-hint]");
     if (hint) {
       hint.textContent = getLan().canDiscover
-        ? "Bli värd så syns spelet för andra på samma Wi-Fi. Eller tryck på ett spel nedan. Inte gästnät."
+        ? "En blir värd. Den andra stannar här tills namnet syns under Spel i närheten. Tillåt enheter i närheten. Inte gästnät."
         : "Android-appen är värd och syns automatiskt för andra på samma Wi-Fi. Inte gästnät.";
     }
     const addr = ui.querySelector("[data-addr]");
@@ -285,7 +291,10 @@ export function mountKautschuk(root: HTMLElement): () => void {
           )
           .join("");
       }
-      if (empty) empty.hidden = rows.length > 0;
+      if (empty) {
+        empty.hidden = rows.length > 0;
+        if (rows.length === 0) empty.textContent = scanNote || "Letar på samma Wi-Fi…";
+      }
     }
     const best = ui.querySelector<HTMLElement>("[data-best]");
     if (best) {

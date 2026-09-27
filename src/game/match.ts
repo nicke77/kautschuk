@@ -100,6 +100,7 @@ export class Match {
     } catch (err) {
       this.error = err instanceof Error ? err.message : "Kunde inte starta värd";
       this.phase = "menu";
+      if (getLan().canDiscover) void getLan().listen();
     }
     this.emit();
   }
@@ -119,6 +120,7 @@ export class Match {
     } catch (err) {
       this.error = err instanceof Error ? err.message : "Kunde inte ansluta";
       this.phase = "menu";
+      if (getLan().canDiscover) void getLan().listen();
       this.emit();
     }
   }
