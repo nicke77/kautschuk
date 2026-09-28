@@ -165,13 +165,6 @@ export function createCar(spawn: { x: number; y: number; h: number }, id: number
 }
 
 export function stepCar(car: Car, input: Input, track: Track, dt: number, totalLaps: number): boolean {
-  if (car.finished) {
-    car.vx *= 1 - Math.min(1, 1.4 * dt);
-    car.vy *= 1 - Math.min(1, 1.4 * dt);
-    car.skid = Math.max(0, car.skid - dt * 2);
-    return false;
-  }
-
   const f = forward(car.heading);
   const r = rightVec(car.heading);
   car.onOil = inOil(track, car.x, car.y);
@@ -232,7 +225,7 @@ export function stepCar(car: Car, input: Input, track: Track, dt: number, totalL
   const lat2 = car.vx * r2.x + car.vy * r2.y;
   const spd2 = Math.hypot(car.vx, car.vy);
   const slip = Math.atan2(lat2, Math.max(48, Math.abs(fwd2)));
-  const drifting = Math.abs(slip) > 0.2 && spd2 > 72 && !car.finished;
+  const drifting = Math.abs(slip) > 0.2 && spd2 > 72;
   if (drifting) {
     car.chain = Math.min(6, car.chain + dt * 0.85);
     const opposite = input.steer !== 0 && Math.sign(input.steer) !== Math.sign(lat2) ? 1.55 : 1;

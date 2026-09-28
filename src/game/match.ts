@@ -25,6 +25,7 @@ export class Match {
   countdown = 0;
   raceTime = 0;
   flash = "";
+  botSlots = 3;
   private flashHold = 0;
   private inputs = new Map<number, Input>();
   private connToId = new Map<string, number>();
@@ -126,6 +127,20 @@ export class Match {
   }
 
   private pendingName = "Du";
+
+  endRace(): void {
+    if (this.mode === "client") return;
+    this.finish();
+  }
+
+  setBotSlots(count: number): void {
+    if (this.mode !== "host" || this.phase !== "lobby" || !Number.isFinite(count)) return;
+    const next = Math.max(0, Math.min(this.maxBots(), Math.round(count)));
+    if (next === this.botSlots) return;
+    this.botSlots = next;
+    this.broadcastLobby();
+    this.emit();
+  }
 
   startRace(): void {
     if (this.mode === "client") return;
@@ -234,16 +249,16 @@ export class Match {
       const wasFinished = car.finished;
       const input = car.bot ? botInput(car, track) : (this.inputs.get(car.id) ?? ZERO_INPUT);
       stepCar(car, input, track, dt, this.laps);
-      if (!wasFinished && car.finished) car.finishAt = this.raceTime;
+      if (!wasFinished && car.finished) {
+        car.finishAt = this.raceTime;
+        if (car.id === this.myId) {
+          this.flash = "Mål";
+          this.flashHold = 0.9;
+        }
+      }
     }
     separateCars(this.cars);
     this.tick += 1;
-    if (this.cars.some((c) => c.finished)) {
-      if (this.finishTimer < 0) this.finishTimer = 0;
-      this.finishTimer += dt;
-    }
-    const allDone = this.cars.length > 0 && this.cars.every((c) => c.finished);
-    if (allDone || this.finishTimer > 22) this.finish();
     if (this.mode === "host" && this.tick % 2 === 0) {
       getLan().send(JSON.stringify({ op: "snap", tick: this.tick, cars: this.snapshot() }));
     }
@@ -281,6 +296,7 @@ export class Match {
     this.error = "";
     this.flash = "";
     this.flashHold = 0;
+    this.botSlots = 3;
   }
 
   private beginCountdown(): void {
@@ -307,12 +323,18 @@ export class Match {
 
   private fillBots(): void {
     const track = this.track();
-    while (this.cars.length < 4) {
+    const count = Math.max(0, Math.min(this.botSlots, this.maxBots()));
+    for (let i = 0; i < count; i++) {
       const id = this.nextId++;
       const spawn = track.spawns[this.cars.length % track.spawns.length];
-      const name = BOTS[(this.cars.length - 1) % BOTS.length] ?? "Bot";
-      this.cars.push(createCar({ ...spawn, x: spawn.x - this.cars.length * 6 }, id, name, true));
+      const name = BOTS[i % BOTS.length] ?? "Bot";
+      this.cars.push(createCar({ ...spawn, x: spawn.x - (i + 1) * 8 }, id, name, true));
     }
+  }
+
+  private maxBots(): number {
+    const humans = this.cars.filter((c) => !c.bot).length;
+    return Math.max(0, 4 - humans);
   }
 
   private snapshot(): SnapCar[] {
@@ -344,6 +366,7 @@ export class Match {
         op: "lobby",
         track: this.trackIndex,
         laps: this.laps,
+        bots: this.botSlots,
         players,
       }),
     );
@@ -392,6 +415,7 @@ export class Match {
       this.cars.push(car);
       this.connToId.set(conn, id);
       this.idToConn.set(id, conn);
+      if (this.botSlots > this.maxBots()) this.botSlots = this.maxBots();
       const players = this.cars.filter((c) => !c.bot).map((c) => ({ id: c.id, name: c.name }));
       getLan().send(JSON.stringify({ op: "welcome", id, track: this.trackIndex, laps: this.laps, players }), conn);
       this.broadcastLobby();
@@ -424,6 +448,7 @@ export class Match {
     if (msg.op === "lobby") {
       this.trackIndex = num(msg.track);
       this.laps = num(msg.laps) || LAPS;
+      if (msg.bots !== undefined) this.botSlots = Math.max(0, Math.min(3, num(msg.bots)));
       this.cars = playersToCars(msg.players, this.track());
       this.phase = "lobby";
       this.started = false;
@@ -454,10 +479,6 @@ export class Match {
     }
     if (msg.op === "snap" && Array.isArray(msg.cars)) {
       this.applySnap(msg.cars as SnapCar[]);
-      if (this.phase === "race") {
-        const allDone = this.cars.length > 0 && this.cars.every((c) => c.finished);
-        if (allDone) this.finish();
-      }
     }
   }
 

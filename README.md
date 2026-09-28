@@ -18,7 +18,8 @@ Varje push till `main` bygger en ny APK. Samma fil ligger också som artifact un
 2. Öppna **Nätverk** på båda. Tillåt **enheter i närheten** om Android frågar.
 3. En trycker **Bli värd**. Den andra stannar kvar på nätverksskärmen. Namnet dyker upp under **Spel i närheten**.
 4. Syns inget spel kan adressen skrivas för hand, till exempel `192.168.0.12`.
-5. Värden trycker **Kör**.
+5. Värden väljer antal datorer, 0 till 3, och trycker **Kör**.
+6. Efter mål fortsätter bilarna. **Avsluta** visar resultatet.
 
 Android-tillbaka stegar i menyn (nätverk och resultat tillbaka till menyn, pågående värdlopp tillbaka till lobbyn) i stället för att stänga appen.
 

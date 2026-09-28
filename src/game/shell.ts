@@ -22,6 +22,7 @@ export function mountKautschuk(root: HTMLElement): () => void {
       <div class="score" data-score>0</div>
       <div class="chain" data-chain></div>
     </div>
+    <button type="button" class="btn hud-end" data-end>Avsluta</button>
     <div class="hud-side">
       <div class="kicker">Varv</div>
       <strong data-lap>1/3</strong>
@@ -98,6 +99,14 @@ export function mountKautschuk(root: HTMLElement): () => void {
   ui.querySelector("[data-go]")?.addEventListener("click", () => {
     match.startRace();
   });
+  hud.querySelector("[data-end]")?.addEventListener("click", () => {
+    if (match.mode === "client") {
+      screen = "menu";
+      match.leave();
+      return;
+    }
+    match.endRace();
+  });
   ui.querySelector("[data-again]")?.addEventListener("click", () => match.again());
   ui.querySelector("[data-menu]")?.addEventListener("click", () => {
     stepBack();
@@ -109,6 +118,11 @@ export function mountKautschuk(root: HTMLElement): () => void {
     const ip = btn.getAttribute("data-join-ip") ?? "";
     const port = btn.getAttribute("data-join-port");
     void match.join(port ? `${ip}:${port}` : ip, nameInput.value);
+  });
+  ui.querySelector("[data-bots]")?.addEventListener("click", (ev) => {
+    const btn = (ev.target as HTMLElement).closest<HTMLElement>("[data-bot]");
+    if (!btn) return;
+    match.setBotSlots(Number(btn.dataset.bot));
   });
 
   for (const button of ui.querySelectorAll<HTMLButtonElement>("[data-track]")) {
@@ -274,6 +288,23 @@ export function mountKautschuk(root: HTMLElement): () => void {
     }
     const go = ui.querySelector<HTMLButtonElement>("[data-go]");
     if (go) go.hidden = !(match.mode === "host" && match.phase === "lobby");
+    const botPick = ui.querySelector<HTMLElement>("[data-bots]");
+    const showBotPick = showNet && match.mode === "host" && match.phase === "lobby";
+    if (botPick) botPick.hidden = !showBotPick;
+    if (showBotPick) {
+      const max = Math.max(0, 4 - match.cars.filter((c) => !c.bot).length);
+      for (const button of ui.querySelectorAll<HTMLButtonElement>("[data-bot]")) {
+        const count = Number(button.dataset.bot);
+        button.disabled = count > max;
+        button.setAttribute("aria-pressed", String(count === match.botSlots));
+      }
+    }
+    const botNote = ui.querySelector<HTMLElement>("[data-bots-note]");
+    if (botNote) {
+      const showNote = showNet && match.mode === "client" && match.phase === "lobby";
+      botNote.hidden = !showNote;
+      botNote.textContent = showNote ? `Datorer: ${match.botSlots}` : "";
+    }
     const waiting = ui.querySelector<HTMLElement>("[data-wait]");
     if (waiting) waiting.hidden = !(match.mode === "client" && match.phase === "lobby");
     const discover = ui.querySelector<HTMLElement>("[data-discover]");
@@ -356,7 +387,7 @@ function paintHud(match: Match, hud: HTMLElement, flash: HTMLElement) {
   if (me && score && lap && placeEl) {
     const text = String(Math.floor(me.drift));
     if (score.textContent !== text) score.textContent = text;
-    const lapText = `${Math.min(match.laps, me.lap + (me.finished ? 0 : 1))}/${match.laps}`;
+    const lapText = me.finished ? "Mål" : `${Math.min(match.laps, me.lap + 1)}/${match.laps}`;
     if (lap.textContent !== lapText) lap.textContent = lapText;
     const rank = match.ranking().findIndex((c) => c.id === me.id);
     const p = place(Math.max(0, rank));
@@ -471,6 +502,16 @@ function panel(): HTMLElement {
         <button type="button" class="btn primary" data-host>Bli värd</button>
         <label class="field"><span data-addr>Värdens adress</span><input data-ip placeholder="192.168.0.12" inputmode="decimal" aria-label="Värdens adress" /></label>
         <button type="button" class="btn" data-join>Gå med</button>
+        <div class="bot-pick" data-bots hidden>
+          <span>Datorer</span>
+          <div class="seg">
+            <button type="button" class="btn" data-bot="0">0</button>
+            <button type="button" class="btn" data-bot="1">1</button>
+            <button type="button" class="btn" data-bot="2">2</button>
+            <button type="button" class="btn" data-bot="3" aria-pressed="true">3</button>
+          </div>
+        </div>
+        <p class="note" data-bots-note hidden></p>
         <button type="button" class="btn primary" data-go hidden>Kör</button>
         <p class="note" data-wait hidden>Väntar på att värden startar.</p>
         <p class="error" data-lobby-error></p>
